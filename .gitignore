@@ -1,0 +1,17 @@
+# 依赖
+node_modules/
+
+# 构建产物（vsix 走 GitHub Releases 发布，不入库）
+dist/
+*.vsix
+
+# 本地联调与截图（e2e bridge 的工作目录、隔离 VS Code 实例、截图）
+.smoke-tmp/
+
+# 日志与凭据
+*.log
+*.tmp
+
+# 系统
+.DS_Store
+Thumbs.db

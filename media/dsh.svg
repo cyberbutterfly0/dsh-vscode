@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <!-- dsh 的抽象标记：一个开口的环 + 中心点，代表「对话流」 -->
+  <path d="M12 3.2a8.8 8.8 0 1 0 6.2 15.0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+  <path d="M18.2 5.4 15 8.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dsh chat webview · 本地预览</title>
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <!--
+    本地预览页（仅开发用，不进 VS Code）：
+      - media/chat.css   与真实 webview 共用同一份样式；
+      - media/chat.js    与真实 webview 共用同一份脚本，只是宿主被 dev-fixtures.js 顶掉；
+      - media/dev-fixtures.js 必须在 chat.js 之前加载：它 stub acquireVsCodeApi()、
+        注入 VS Code 主题变量、造工具栏和假数据。
+    打开方式：直接用浏览器打开本文件（file:// 即可），或
+      python -m http.server 8000 --directory media  然后访问 /preview.html
+    顶部按钮切换场景：完整会话 / 流式输出 / 审批提问 / 空态 / 未登录 / 中断与错误 / 排队。
+  -->
+  <div id="dsx-root"></div>
+
+  <script src="dev-fixtures.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>
