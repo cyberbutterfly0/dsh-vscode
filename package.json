@@ -314,7 +314,8 @@
     "typecheck": "tsc --noEmit",
     "vsix": "node scripts/make-vsix.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "test:editor-context": "node scripts/test-editor-context.mjs"
+    "test:editor-context": "node scripts/test-editor-context.mjs",
+    "install:local": "node scripts/install-local.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
