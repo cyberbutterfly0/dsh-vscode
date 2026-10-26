@@ -1448,8 +1448,10 @@ body {
 }
 
 /* ── composer ── */
+/* 边框用中性色：不要把 --vscode-input-border 直接当边框色，
+   不少主题把它设成强调蓝，看起来像一直「聚焦中」 */
 .dsx-composer {
-  border: 1px solid var(--dsx-input-border, var(--dsx-border));
+  border: 1px solid var(--dsx-border);
   border-radius: 6px;
   background: var(--dsx-input-bg);
   padding: 6px 8px 4px;
