@@ -72,6 +72,10 @@ code --profile stm32 --install-extension dsh-vscode-0.1.0.vsix --force
 | `dsh.logLevel` | `error` / `warn` / `info` / `debug` |
 | `dsh.sendWorkspaceContext` | 每条消息自动附带编辑器上下文（当前文件、选区或光标行、该文件的 error/warning）。默认关，开了每轮多几百字 |
 | `dsh.openViewOnStart` | 打开 VS Code 就自动展开侧栏聊天视图 |
+| `dsh.fullUiZoom` | `1` | 完整 dsh UI（iframe）缩放，0.5–1.5 |
+| `dsh.startTimeoutMs` | `45000` | 等 dsh 打印地址的超时（毫秒） |
+| `dsh.stopOnExit` | `false` | 关 VS Code 时是否杀掉自己启动的 dsh |
+| `dsh.env` | `{}` | 追加给 dsh 进程的环境变量 |
 
 ## 出问题怎么办
 

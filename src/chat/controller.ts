@@ -16,6 +16,7 @@ import type { Logger } from '../log';
 import type { HostToWeb, WebToHost } from '../protocol';
 import { SessionCore } from './core';
 import { collectEditorContext } from './editor-context';
+import { DiffUnavailableError, openNativeDiff } from './diff-docs';
 import { openFullUi } from './full-ui';
 import { ChatPanel, type ChatHost, type PanelState } from './panel';
 import { ChatView } from './view';
@@ -37,6 +38,8 @@ export class ChatController implements ChatHost {
         attachUrl: this.config.attachUrl,
         cliPath: this.config.cliPath,
         extraSpawnArgs: this.config.extraSpawnArgs,
+        startTimeoutMs: this.config.startTimeoutMs,
+        env: this.config.env,
         autoStart: this.config.autoStart,
         defaultCwd: this.config.defaultCwd,
         defaultPermission: this.config.defaultPermission,
@@ -134,7 +137,12 @@ export class ChatController implements ChatHost {
           this.broadcast({ type: 'notice', level: 'warn', text: '还没连上 dsh，先连接再切完整界面' });
           return;
         }
-        openFullUi(url);
+        openFullUi({
+          url,
+          sessionId: this.core.state.sessionId || undefined,
+          title: this.core.state.title ? `dsh · ${this.core.state.title}` : undefined,
+          zoom: this.config.fullUiZoom,
+        });
         return;
       }
       case 'pick-cwd': {
@@ -178,6 +186,10 @@ export class ChatController implements ChatHost {
         await this.core.handle(msg);
         return;
       }
+      case 'open-native-diff': {
+        await this.openNativeDiff(msg.sessionId, msg.seq, msg.index);
+        return;
+      }
       case 'open-file': {
         const path = msg.path.trim();
         if (!path) return;
@@ -196,8 +208,47 @@ export class ChatController implements ChatHost {
     }
   }
 
-  private async insertFileReference(query?: string): Promise<void> {
-    const files = await vscode.workspace.findFiles(
+  /** 用 VS Code 原生并排 diff 打开一个文件的改动 */
+  private async openNativeDiff(sessionId: string, seq: number, index: number): Promise<void> {
+    let diff;
+    try {
+      diff = await this.core.fetchDiff(sessionId, seq, index);
+    } catch (e) {
+      this.broadcast({ type: 'notice', level: 'warn', text: diffFailureText(e) });
+      return;
+    }
+
+    if (diff.kind !== 'text') {
+      this.broadcast({
+        type: 'notice',
+        level: 'warn',
+        text: diff.kind === 'binary' ? '这是二进制文件，没有可对比的文本。' : '文件太大，dsh 没有生成逐行对比。',
+      });
+      return;
+    }
+
+    try {
+      await openNativeDiff(this.context, {
+        sessionId,
+        seq,
+        index,
+        path: diff.path,
+        display: diff.display,
+        hunks: diff.hunks ?? [],
+        before: diff.before,
+        after: diff.after,
+        coarse: diff.coarse === true,
+      });
+    } catch (e) {
+      if (e instanceof DiffUnavailableError) {
+        this.broadcast({ type: 'notice', level: 'warn', text: e.message });
+        return;
+      }
+      this.broadcast({ type: 'notice', level: 'warn', text: `打不开对比：${(e as Error).message}` });
+    }
+  }
+
+  private async insertFileReference(query?: string): Promise<void> {    const files = await vscode.workspace.findFiles(
       query && query.trim() ? `**/*${query.trim()}*` : '**/*',
       '**/node_modules/**',
       200,
@@ -359,9 +410,21 @@ export class ChatController implements ChatHost {
     return this.core.fullUiUrl;
   }
 
-  dispose(): void {
+  dispose(opts?: { killRuntime?: boolean }): void {
     this.disposed = true;
-    this.core.dispose();
+    this.core.dispose(opts);
   }
 }
 
+
+/**
+ * 把「取不到 diff」翻译成用户能懂的话。
+ * 404 是常态：changes 摘要只活在 dsh 进程内存里，重启后老轮次就没了。
+ */
+function diffFailureText(e: unknown): string {
+  const err = e as { status?: number; message?: string };
+  if (err?.status === 404 || /unavailable/i.test(err?.message ?? '')) {
+    return '这一轮的改动数据已经失效。dsh 只把 diff 留在当前进程内存里，重启或被别的实例接管后就取不到了。';
+  }
+  return `取不到这个文件的改动：${err?.message ?? String(e)}`;
+}

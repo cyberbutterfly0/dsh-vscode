@@ -92,6 +92,8 @@ export interface SpawnOptions {
   cwd?: string;
   logger: Logger;
   timeoutMs?: number;
+  /** 追加/覆盖给 dsh 进程的环境变量 */
+  env?: Record<string, string>;
 }
 
 export interface SpawnedRuntime {
@@ -191,7 +193,7 @@ async function trySpawn(candidate: CliCandidate, noOpen: boolean, opts: SpawnOpt
     shell: candidate.useShell,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, DSH_VSCODE_SPAWNED: '1' },
+    env: { ...process.env, DSH_VSCODE_SPAWNED: '1', ...(opts.env ?? {}) },
   });
 
   const stderrTail: string[] = [];

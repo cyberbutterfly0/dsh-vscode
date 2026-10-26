@@ -1467,10 +1467,27 @@
       });
       row.appendChild(openBtn);
 
+      // 「并排对比」：交给 VS Code 原生 diff 视图，比内联 hunk 更适合逐行看
+      var sideBtn = mk('button', 'dsx-chg-open', '并排对比');
+      sideBtn.type = 'button';
+      sideBtn.hidden = true;
+      sideBtn.title = '用 VS Code 原生 diff 打开 ' + str(f.path, '');
+      sideBtn.addEventListener('click', function (ev2) {
+        ev2.stopPropagation();
+        if (!f.path) return;
+        post({
+          type: 'open-native-diff',
+          sessionId: str(ch.sessionId),
+          seq: num(ch.seq) || 0,
+          index: num(index)
+        });
+      });
+      row.appendChild(sideBtn);
+
       var slot = mk('div', 'dsx-chg-slot');
       slot.hidden = true;
 
-      var rec = { index: index, file: f, row: row, slot: slot, openBtn: openBtn, open: false, diffEl: null };
+      var rec = { index: index, file: f, row: row, slot: slot, openBtn: openBtn, sideBtn: sideBtn, open: false, diffEl: null };
       items[index] = rec;
       bindChangeRow(key, rec);
       item.appendChild(row);
@@ -1500,6 +1517,7 @@
     rec.slot.hidden = false;
     rec.row.setAttribute('aria-expanded', 'true');
     rec.openBtn.hidden = false;
+    if (rec.sideBtn) rec.sideBtn.hidden = false;
     if (rec.diffEl) return; // 已加载，直接露出
 
     var cached = S.diffs[key + '|' + rec.index];

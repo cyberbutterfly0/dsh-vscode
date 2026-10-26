@@ -200,6 +200,8 @@ export type WebToHost =
   | { type: 'open-link'; href: string }
   /** 展开某个文件的改动对比 */
   | { type: 'load-diff'; sessionId: string; seq: number; index: number }
+  /** 用 VS Code 原生并排 diff 打开某个文件的改动 */
+  | { type: 'open-native-diff'; sessionId: string; seq: number; index: number }
   /** 用 VS Code 打开这个文件 */
   | { type: 'open-file'; path: string }
   | { type: 'reconnect' }

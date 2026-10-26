@@ -2,7 +2,7 @@
   "name": "dsh-vscode",
   "displayName": "DSH for VS Code",
   "description": "把 DeepSeek Harness (dsh) 接进 VS Code：自绘聊天面板 + 一键切换完整 dsh Web UI。",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -92,6 +92,17 @@
         "command": "dsh.askAboutFile",
         "title": "就当前文件问 DSH",
         "category": "DSH"
+      },
+      {
+        "command": "dsh.renameSession",
+        "title": "重命名会话",
+        "category": "DSH",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "dsh.zoomFullUi",
+        "title": "缩放完整 dsh UI",
+        "category": "DSH"
       }
     ],
     "viewsContainers": {
@@ -172,6 +183,13 @@
         {
           "command": "dsh.askAboutFile",
           "when": "resourceScheme == file",
+          "group": "dsh@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dsh.renameSession",
+          "when": "view == dsh.sessions && viewItem =~ /^dsh\\.session/",
           "group": "dsh@1"
         }
       ]
@@ -259,6 +277,33 @@
           "type": "boolean",
           "default": false,
           "description": "启动时自动打开侧栏聊天视图。"
+        },
+        "dsh.fullUiZoom": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0.5,
+          "maximum": 1.5,
+          "description": "完整 dsh UI（iframe）的缩放比例。窗口窄时调小一点能少滚动。"
+        },
+        "dsh.startTimeoutMs": {
+          "type": "number",
+          "default": 45000,
+          "minimum": 5000,
+          "maximum": 300000,
+          "description": "自己启动 dsh 时，等它打印 Web 地址的最长毫秒数。机器慢就调大。"
+        },
+        "dsh.stopOnExit": {
+          "type": "boolean",
+          "default": false,
+          "description": "关闭 VS Code 时是否顺带杀掉扩展自己启动的 dsh 进程。连的是别人启动的实例时永远不动。"
+        },
+        "dsh.env": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "启动 dsh 时追加的环境变量，例如 { \"HTTPS_PROXY\": \"http://127.0.0.1:7890\" }。"
         }
       }
     }

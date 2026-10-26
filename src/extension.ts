@@ -11,7 +11,7 @@ import { ChatController } from './chat/controller';
 import { collectEditorContext } from './chat/editor-context';
 import { ChatPanel, type PanelState } from './chat/panel';
 import { ChatView, traceChatView } from './chat/view';
-import { closeFullUi, openFullUi } from './chat/full-ui';
+import { applyFullUiZoom, closeFullUi, openFullUi } from './chat/full-ui';
 import { defaultStateFile } from './dsh/client';
 import { t } from './i18n';
 import { createLogger, type Logger } from './log';
@@ -120,7 +120,29 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showWarningMessage('还没连上 dsh，先连接再切完整界面');
       return;
     }
-    openFullUi(url);
+    openFullUi({
+      url,
+      sessionId: controller?.currentSessionId || undefined,
+      zoom: config?.fullUiZoom,
+    });
+  });
+  reg('dsh.zoomFullUi', async () => {
+    const picked = await vscode.window.showQuickPick(
+      [
+        { label: '75%', value: 0.75 },
+        { label: '90%', value: 0.9 },
+        { label: '100%（默认）', value: 1 },
+        { label: '110%', value: 1.1 },
+        { label: '125%', value: 1.25 },
+        { label: '150%', value: 1.5 },
+      ],
+      { title: '完整 dsh UI 缩放', placeHolder: '窗口窄的时候调小一点' },
+    );
+    if (!picked) return;
+    await vscode.workspace
+      .getConfiguration('dsh')
+      .update('fullUiZoom', picked.value, vscode.ConfigurationTarget.Global);
+    applyFullUiZoom(picked.value);
   });
   reg('dsh.selectModel', async () => {
     await openChat();
@@ -151,6 +173,26 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.window.showTextDocument(doc);
     } catch {
       void vscode.window.showInformationMessage(`凭据文件还没生成：${file}`);
+    }
+  });
+
+  // 会话重命名：侧栏会话项右键触发，参数是 getTreeItem 生成的那个节点
+  reg('dsh.renameSession', async (item?: unknown) => {
+    const row = (item as { row?: { sessionId?: string; title?: string } } | undefined)?.row;
+    const sessionId = row?.sessionId;
+    if (!sessionId || !controller) return;
+    const next = await vscode.window.showInputBox({
+      title: '重命名会话',
+      prompt: '给这条会话起个名字',
+      value: row?.title ?? '',
+      validateInput: (v) => (v.trim() ? undefined : '名字不能为空'),
+    });
+    const title = next?.trim();
+    if (!title) return;
+    try {
+      await controller.handleWebMessage({ type: 'rename-session', sessionId, title });
+    } catch (e) {
+      void vscode.window.showErrorMessage(`重命名失败：${(e as Error).message}`);
     }
   });
   reg('dsh.refreshSessions', async () => {
@@ -220,6 +262,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!e.affectsConfiguration('dsh')) return;
       const next = readConfig();
       await controller?.reloadConfig(next);
+      // 缩放改了要立刻反映到已经开着的完整 UI 面板
+      applyFullUiZoom(next.fullUiZoom);
       logger('info', '配置已重新读取');
     }),
   );
@@ -227,7 +271,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({
     dispose: () => {
       closeFullUi();
-      controller?.dispose();
+      controller?.dispose({ killRuntime: readConfig().stopOnExit });
       controller = undefined;
       output?.dispose();
       output = undefined;
@@ -251,7 +295,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   closeFullUi();
-  controller?.dispose();
+  // 只在用户开了 dsh.stopOnExit 时杀掉我们自己 spawn 的 dsh；
+  // 连的是别人的实例时 core 内部会忽略 killRuntime。
+  controller?.dispose({ killRuntime: readConfig().stopOnExit });
   controller = undefined;
 }
 

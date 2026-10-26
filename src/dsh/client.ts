@@ -26,6 +26,10 @@ export interface ConnectOptions {
   attachUrl?: string;
   cliPath?: string;
   extraSpawnArgs?: string[];
+  /** spawn 后等 URL 的超时 */
+  startTimeoutMs?: number;
+  /** 追加给 dsh 进程的环境变量 */
+  env?: Record<string, string>;
   logger: Logger;
   /** 凭据共享文件，默认 ~/.dsh/dsh-vscode/instances.json */
   stateFile?: string;
@@ -277,6 +281,8 @@ export class DshConnection {
       extraArgs: opts.extraSpawnArgs,
       logger,
       cwd: os.homedir(),
+      timeoutMs: opts.startTimeoutMs,
+      env: opts.env,
     });
     const target: LaunchTarget = runtime.target;
     let session: ApiSession;

@@ -26,6 +26,7 @@ import type {
   ModelSelection,
   SessionFollowFrame,
   SessionWireEvent,
+  WorkspaceFileDiff,
 } from '../dsh/types';
 
 export interface CoreConfig {
@@ -33,6 +34,10 @@ export interface CoreConfig {
   attachUrl: string;
   cliPath: string;
   extraSpawnArgs: string[];
+  /** spawn 后等 URL 的超时 */
+  startTimeoutMs: number;
+  /** 追加给 dsh 进程的环境变量 */
+  env: Record<string, string>;
   autoStart: boolean;
   defaultCwd: string;
   defaultPermission: string;
@@ -187,6 +192,8 @@ export class SessionCore {
         attachUrl: attachUrl || undefined,
         cliPath: cfg.cliPath || undefined,
         extraSpawnArgs: cfg.extraSpawnArgs,
+        startTimeoutMs: cfg.startTimeoutMs,
+        env: cfg.env,
         logger: this.opts.logger,
         onMuxState: (state, detail) => {
           if (state === 'reconnecting') {
@@ -678,6 +685,19 @@ export class SessionCore {
     }
   }
 
+  /**
+   * 拉某个文件的 diff 原始数据，不推 webview。
+   * 原生并排 diff 由 controller 拿到数据后自己开虚拟文档。
+   *
+   * 注意：changes 摘要只活在 dsh 进程内存里，进程重启后老 seq 会 404，
+   * 调用方要把这个当成"数据已失效"而不是网络错误。
+   */
+  async fetchDiff(sessionId: string, seq: number, index: number): Promise<WorkspaceFileDiff> {
+    const conn = this.conn;
+    if (!conn) throw new Error('还没连上 dsh');
+    return conn.api.changesDiff(sessionId, seq, index);
+  }
+
   /** webview 点开某个文件时取它的对比。 */
   async loadDiff(sessionId: string, seq: number, index: number): Promise<void> {
     const conn = this.conn;
@@ -1018,13 +1038,20 @@ export class SessionCore {
     this.opts.post({ type: 'status', connected: false, running: false });
   }
 
-  dispose(): void {
+  /**
+   * 扩展退出时调用。
+   * `killRuntime: true` 才杀掉我们自己 spawn 的 dsh——连的是别人的实例时永远不杀。
+   */
+  dispose(opts?: { killRuntime?: boolean }): void {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSessionRefresh();
     this.closeStreams();
-    void this.conn?.disconnect();
+    const conn = this.conn;
     this.conn = undefined;
+    if (!conn) return;
+    if (opts?.killRuntime && conn.spawnedByUs) void conn.dispose({ killRuntime: true });
+    else void conn.disconnect();
   }
 }
 
