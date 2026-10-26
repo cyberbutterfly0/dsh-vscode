@@ -53,6 +53,12 @@ export function renderChatHtml(webview: vscode.Webview, context: vscode.Extensio
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob: https:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${n}';" />
 <link rel="stylesheet" href="${style}" />
+<style>
+  /* 兜底（随 HTML 每次生成，不受 css 缓存影响），并排在外部样式之后生效：
+     少数主题把 --vscode-input-border / --vscode-panel-border 设成强调色，
+     会让输入框看起来一直处于聚焦状态。这里固定成中性灰。 */
+  .dsx-composer { border-color: rgba(128, 128, 128, 0.32); }
+</style>
 <title>dsh</title>
 </head>
 <body>
