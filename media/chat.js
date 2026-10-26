@@ -2361,6 +2361,75 @@
     updateComposerState();
   }
 
+  // ── 粘贴 / 拖拽图片 ──
+  var IMAGE_TYPE_BY_EXT = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  };
+
+  function mediaTypeOfBlob(blob, name) {
+    var t = str(blob && blob.type, '');
+    if (t.indexOf('image/') === 0) return t;
+    var m = String(name || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+    return (m && IMAGE_TYPE_BY_EXT[m[1]]) || 'image/png';
+  }
+
+  function stampName(mediaType) {
+    var d = new Date();
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    var ts = '' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+      + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+    return '粘贴图片-' + ts + '.' + (String(mediaType).split('/')[1] || 'png');
+  }
+
+  function attachBlob(blob, name) {
+    if (!blob) return;
+    if (blob.size > 8 * 1024 * 1024) {
+      showNotice('warn', '这张图超过 8MB，压缩一下再试');
+      return;
+    }
+    var mediaType = mediaTypeOfBlob(blob, name);
+    var finalName = str(name, '') || stampName(mediaType);
+    var reader = new FileReader();
+    reader.onload = function () {
+      var url = String(reader.result || '');
+      if (!url) { showNotice('warn', '读取粘贴的图片失败'); return; }
+      addImage({ id: 'clip-' + Date.now().toString(36), name: finalName, mediaType: mediaType, dataUrl: url });
+    };
+    reader.onerror = function () { showNotice('warn', '读取粘贴的图片失败'); };
+    reader.readAsDataURL(blob);
+  }
+
+  /** 从 ClipboardEvent / DragEvent 里挑出图片文件 */
+  function imageFilesOf(dt) {
+    var out = [];
+    if (!dt) return out;
+    var i;
+    if (dt.files && dt.files.length) {
+      for (i = 0; i < dt.files.length; i += 1) {
+        var f = dt.files[i];
+        if (f && String(f.type || '').indexOf('image/') === 0) out.push(f);
+      }
+    }
+    if (!out.length && dt.items && dt.items.length) {
+      for (i = 0; i < dt.items.length; i += 1) {
+        var it = dt.items[i];
+        if (it && it.kind === 'file' && String(it.type || '').indexOf('image/') === 0) {
+          var got = it.getAsFile();
+          if (got) out.push(got);
+        }
+      }
+    }
+    return out;
+  }
+
+  function onPaste(e) {
+    var files = imageFilesOf(e.clipboardData);
+    if (!files.length) return; // 纯文本粘贴走默认行为
+    e.preventDefault();
+    for (var i = 0; i < files.length; i += 1) attachBlob(files[i], files[i].name || '');
+  }
+
   function autoGrow() {
     U.input.style.height = 'auto';
     var h = Math.min(U.input.scrollHeight || 24, 220);
@@ -2371,13 +2440,14 @@
     var text = U.input.value.trim();
     S.draft = text;
     var hasText = !!text;
-    var canSend = S.connected && hasText;
-    U.btnSend.classList.toggle('dsx-send-stop', S.running && !hasText);
-    if (S.running && !hasText) {
+    var hasImages = attached.length > 0;
+    var canSend = S.connected && (hasText || hasImages);
+    U.btnSend.classList.toggle('dsx-send-stop', S.running && !hasText && !hasImages);
+    if (S.running && !hasText && !hasImages) {
       U.btnSend.textContent = '停止';
       U.btnSend.disabled = false;
       U.btnSend.title = '取消当前回合';
-    } else if (S.running && hasText) {
+    } else if (S.running && (hasText || hasImages)) {
       U.btnSend.textContent = '排队发送';
       U.btnSend.disabled = !canSend;
       U.btnSend.title = '回合运行中，发送会排到下一轮';
@@ -2390,7 +2460,9 @@
     }
     if (hasText) {
       var est = Math.ceil(text.length / 1.7);
-      U.hint.textContent = text.length + ' 字 · 约 ' + est + ' tokens';
+      U.hint.textContent = (hasImages ? attached.length + ' 张图 · ' : '') + text.length + ' 字 · 约 ' + est + ' tokens';
+    } else if (hasImages) {
+      U.hint.textContent = attached.length + ' 张图';
     } else if (!S.connected) {
       U.hint.textContent = '未连接';
     } else {
@@ -2433,6 +2505,24 @@
     if (U.btnImage) {
       U.btnImage.addEventListener('click', function () { post({ type: 'pick-image' }); });
     }
+    // 直接 Ctrl+V 粘图（截图工具复制后粘进来最常用）
+    U.input.addEventListener('paste', onPaste);
+    U.composer.addEventListener('paste', onPaste);
+    // 拖图片进输入框
+    U.composer.addEventListener('dragover', function (e) {
+      if (!imageFilesOf(e.dataTransfer).length) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      U.composer.classList.add('dsx-drop');
+    });
+    U.composer.addEventListener('dragleave', function () { U.composer.classList.remove('dsx-drop'); });
+    U.composer.addEventListener('drop', function (e) {
+      var files = imageFilesOf(e.dataTransfer);
+      U.composer.classList.remove('dsx-drop');
+      if (!files.length) return;
+      e.preventDefault();
+      for (var i = 0; i < files.length; i += 1) attachBlob(files[i], files[i].name || '');
+    });
     U.btnSend.addEventListener('click', function () {
       if (S.running && !U.input.value.trim()) { post({ type: 'cancel' }); return; }
       doSend();

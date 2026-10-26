@@ -1464,6 +1464,12 @@ body {
   outline: 0;
 }
 
+/* 拖图片进输入框时的高亮 */
+.dsx-composer.dsx-drop {
+  background: var(--dsx-hover);
+  box-shadow: inset 0 0 0 1px var(--dsx-focus);
+}
+
 .dsx-input {
   appearance: none;
   border: 0;
