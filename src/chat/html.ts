@@ -4,6 +4,8 @@
  * CSP 只放行 media/ 下的 chat.js + chat.css，脚本用 nonce。
  */
 
+import * as fs from 'node:fs';
+
 import * as vscode from 'vscode';
 
 import { t } from '../i18n';
@@ -21,10 +23,28 @@ function nonce(): string {
 export const MEDIA_ROOT = (context: vscode.ExtensionContext): vscode.Uri =>
   vscode.Uri.joinPath(context.extensionUri, 'media');
 
+/**
+ * 给资源 URI 加一个按修改时间变化的查询串。
+ *
+ * webview 是按 URI 缓存 css/js 的，文件内容变了但 URI 不变时会继续用旧的 ——
+ * 改完样式刷新窗口都看不到效果就是这个原因。带上 mtime 后每次改动必然换 URI。
+ */
+function cacheKey(context: vscode.ExtensionContext, name: string): string {
+  try {
+    return String(Math.trunc(fs.statSync(vscode.Uri.joinPath(MEDIA_ROOT(context), name).fsPath).mtimeMs));
+  } catch {
+    return '0';
+  }
+}
+
 export function renderChatHtml(webview: vscode.Webview, context: vscode.ExtensionContext): string {
   const mediaRoot = MEDIA_ROOT(context);
-  const script = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'chat.js'));
-  const style = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'chat.css'));
+  const script = webview
+    .asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'chat.js'))
+    .with({ query: `v=${cacheKey(context, 'chat.js')}` });
+  const style = webview
+    .asWebviewUri(vscode.Uri.joinPath(mediaRoot, 'chat.css'))
+    .with({ query: `v=${cacheKey(context, 'chat.css')}` });
   const n = nonce();
   return `<!DOCTYPE html>
 <html lang="zh-CN">
