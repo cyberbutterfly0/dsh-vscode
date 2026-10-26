@@ -13,10 +13,22 @@ npm i -g @deepseek-ai/dsh
 dsh --version
 ```
 
-装扩展（打好的 vsix）：
+装扩展：
 
 ```powershell
+# 从 Releases 下载 dsh-vscode-0.1.0.vsix 后
 code --install-extension dsh-vscode-0.1.0.vsix
+
+# 或自己打一份
+npm install
+npm run build
+node scripts/make-vsix.mjs     # 产物在 dist/
+```
+
+要装进别的配置文件（VS Code 的 profile）就加 `--profile`：
+
+```powershell
+code --profile stm32 --install-extension dsh-vscode-0.1.0.vsix --force
 ```
 
 装完后活动栏出现 dsh 图标，命令面板里有 `dsh:` 开头的命令。
