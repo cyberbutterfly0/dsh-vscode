@@ -124,7 +124,10 @@ export type HostToWeb =
   | { type: 'changes'; changes: UiChanges }
   /** 变更汇总里某个文件的对比（/api/changes.diff 的结果） */
   | { type: 'diff'; diff: UiDiff }
-  | { type: 'auth-needed'; reason: 'no-token' | 'token-expired' | 'disconnected'; authority?: string };
+  | { type: 'auth-needed'; reason: 'no-token' | 'token-expired' | 'disconnected'; authority?: string }
+  /** 用户选好了图片（dataUrl 给 webview 直接当缩略图用） */
+  | { type: 'image-picked'; id: string; name: string; mediaType: string; dataUrl: string; bytes: number }
+  | { type: 'image-error'; text: string };
 
 // ── 改动可视化 ──────────────────────────────────────────────────────────────
 
@@ -174,10 +177,20 @@ export interface UiDiff {
 
 // ── webview → 扩展 ──────────────────────────────────────────────────────────
 
+export interface UiImagePart {
+  /** 图片 MIME，如 image/png */
+  mediaType: string;
+  /** base64，不带 data: 前缀 */
+  data: string;
+  name?: string;
+}
+
 export interface PromptPayload {
   text: string;
-  /** 图片/文件附件（暂只支持文本，字段先留着） */
+  /** 文本块（保留字段，目前与 text 等价） */
   content?: { type: 'text'; text: string }[];
+  /** 随消息一起发出去的图片 */
+  images?: UiImagePart[];
   mode?: 'queue' | 'steer';
 }
 
@@ -205,6 +218,8 @@ export type WebToHost =
   /** 用 VS Code 打开这个文件 */
   | { type: 'open-file'; path: string }
   | { type: 'reconnect' }
+  /** 让扩展弹「选择图片」，选完通过 HostToWeb.image-picked 回传 */
+  | { type: 'pick-image' }
   | { type: 'insert-file-reference'; query?: string };
 
 export type { JsonValue, TokenUsage };

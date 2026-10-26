@@ -17,7 +17,7 @@ dsh --version
 
 ```powershell
 # 从 Releases 下载 dsh-vscode-0.1.0.vsix 后
-code --install-extension dsh-vscode-0.1.0.vsix
+code --install-extension dsh-vscode-0.2.1.vsix
 
 # 或自己打一份
 npm install
@@ -28,7 +28,7 @@ node scripts/make-vsix.mjs     # 产物在 dist/
 要装进别的配置文件（VS Code 的 profile）就加 `--profile`：
 
 ```powershell
-code --profile stm32 --install-extension dsh-vscode-0.1.0.vsix --force
+npm run install:local            # 默认 profile + 所有 profile 一次装完（会清掉旧版本目录）
 ```
 
 装完后活动栏出现 dsh 图标，命令面板里有 `dsh:` 开头的命令。
@@ -47,6 +47,8 @@ code --profile stm32 --install-extension dsh-vscode-0.1.0.vsix --force
 | 审批 | 模型要越权时聊天里弹卡片，允许一次 / 拒绝 |
 | 看本轮改了哪些文件 | 每轮结束后聊天里出现「± 改动 N 个文件」卡片，点文件名展开红绿 diff，右侧可「用编辑器打开」 |
 | 带着当前代码提问 | 编辑器里选中 → 右键 `把选中的代码发给 DSH`；或右键 `就当前文件问 DSH`；或设置里打开 `dsh.sendWorkspaceContext` 让每条消息自动带上下文 |
+| 发图片 | 聊天底部左侧 `图片` 按钮，多选后缩略图显示在输入框上方，随消息一起发出 |
+| 会话被别的窗口占用 | 不用管：会自动新建同目录会话继续，聊天里给一条提示 |
 
 ### 连接方式
 
@@ -126,3 +128,4 @@ media/
 ## 许可
 
 私有自用，不分发到 Marketplace。
+

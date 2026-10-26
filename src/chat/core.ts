@@ -24,6 +24,7 @@ import type {
   AssistantStreamFrame,
   JsonValue,
   ModelSelection,
+  PromptContentPart,
   SessionFollowFrame,
   SessionWireEvent,
   WorkspaceFileDiff,
@@ -823,17 +824,26 @@ export class SessionCore {
 
   // ── 发消息 ──────────────────────────────────────────────────────────────
 
-  async sendPrompt(text: string, mode: 'queue' | 'steer' = 'queue'): Promise<void> {
+  async sendPrompt(
+    text: string,
+    mode: 'queue' | 'steer' = 'queue',
+    images?: { mediaType: string; data: string; name?: string }[],
+  ): Promise<void> {
     if (!this.conn) throw new Error('还没连上 dsh');
     if (!this.sessionId) await this.newSession();
     const sessionId = this.sessionId as string;
     const body = text.trim();
-    if (!body) return;
+    if (!body && !images?.length) return;
+    const parts: PromptContentPart[] = [];
+    for (const img of images ?? []) {
+      parts.push({ type: 'image', mediaType: img.mediaType, data: img.data, name: img.name });
+    }
+    parts.push({ type: 'text', text: body });
     const request = {
       requestId: `vsc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       sessionId,
       mode,
-      content: [{ type: 'text' as const, text: body }],
+      content: parts,
       clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
     try {
@@ -849,11 +859,23 @@ export class SessionCore {
       try {
         await this.conn.api.sessionPrompt(request);
       } catch (again) {
-        // 还是被占：多半是这条会话在别的进程里留着写句柄（旧窗口/旧实例没退干净）。
-        // 这条会话基本废了，直接告诉用户换新会话，别把线上英文原文甩到脸上。
+        // 还是被占：一条会话同时只能有一个写入方，多半是它在桌面端/另一个窗口里开着。
+        // 不把线上的英文原文甩给用户，也不让人手动再开一条——直接沿用同一个工作目录新建会话继续。
         const detail = (again as Error).message;
-        this.opts.logger('error', 'prompt 仍被 writer-held 拒', detail);
-        throw new Error('这条会话被另一个窗口或进程占着写句柄，当前发不出去。新建一个会话继续（旧会话的内容不会丢）。');
+        this.opts.logger('warn', 'prompt 仍被 writer-held 拒，自动新建会话继续', detail);
+        const cwd = this.sessionCwd || undefined;
+        await this.newSession(cwd);
+        const next = {
+          ...request,
+          requestId: `vsc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          sessionId: this.sessionId as string,
+        };
+        await this.conn.api.sessionPrompt(next);
+        this.opts.post({
+          type: 'notice',
+          level: 'warn',
+          text: '原会话正被其他 DSH 窗口占用（一条会话同时只能有一个写入方），已在新会话里继续，工作目录不变。',
+        });
       }
     }
     this.running = true;
@@ -986,7 +1008,7 @@ export class SessionCore {
         if (this.conn && this.sessionId) void this.reopenFollow();
         return true;
       case 'prompt':
-        await this.sendPrompt(msg.text, msg.mode ?? 'queue');
+        await this.sendPrompt(msg.text, msg.mode ?? 'queue', msg.images);
         return true;
       case 'cancel':
         await this.cancel();

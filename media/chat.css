@@ -2118,3 +2118,56 @@ body {
 .dsx-dl-text {
   white-space: pre;
 }
+
+/* ── composer 里的图片附件 ── */
+.dsx-img-btn {
+  flex: 0 0 auto;
+}
+
+.dsx-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 4px;
+}
+
+.dsx-attach-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 3px;
+  border-radius: 5px;
+  background: var(--dsx-code-bg);
+  max-width: 220px;
+}
+
+.dsx-attach-thumb {
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+
+.dsx-attach-name {
+  font-size: calc(var(--dsx-font-size) - 2px);
+  color: var(--dsx-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dsx-attach-x {
+  border: 0;
+  background: transparent;
+  color: var(--dsx-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.dsx-attach-x:hover {
+  color: var(--dsx-danger);
+}

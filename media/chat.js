@@ -494,8 +494,13 @@
     U.planChip.type = 'button';
     U.planChip.hidden = true;
     U.planChip.title = '计划模式已开启';
+    U.btnImage = mk('button', 'dsx-chip dsx-img-btn', '图片');
+    U.btnImage.type = 'button';
+    U.btnImage.title = '选一张图片附到这条消息';
+    U.btnImage.setAttribute('aria-label', '添加图片');
     U.hint = mk('span', 'dsx-hint');
     cleft.appendChild(U.planChip);
+    cleft.appendChild(U.btnImage);
     cleft.appendChild(U.hint);
     var cright = mk('div', 'dsx-composer-right');
     U.btnSend = mk('button', 'dsx-btn dsx-btn-primary dsx-send', '发送');
@@ -504,6 +509,10 @@
     crow.appendChild(cleft);
     crow.appendChild(cright);
     U.composer.appendChild(U.input);
+    // 已选图片的缩略图条（有图才显示）
+    U.attach = mk('div', 'dsx-attach');
+    U.attach.hidden = true;
+    U.composer.appendChild(U.attach);
     U.composer.appendChild(crow);
     U.meter = mk('div', 'dsx-meter');
     bottom.appendChild(U.dock);
@@ -2310,6 +2319,48 @@
 
   // ═══════════════════════════ 16. Composer ═══════════════════════════
 
+  // 已选图片：{ id, name, mediaType, dataUrl }；发送后清空
+  var attached = [];
+
+  function renderAttach() {
+    if (!U.attach) return;
+    U.attach.innerHTML = '';
+    U.attach.hidden = attached.length === 0;
+    attached.forEach(function (img) {
+      var box = mk('div', 'dsx-attach-item');
+      var thumb = mk('img', 'dsx-attach-thumb');
+      thumb.src = img.dataUrl;
+      thumb.alt = img.name;
+      box.appendChild(thumb);
+      var nameEl = mk('span', 'dsx-attach-name', img.name);
+      box.appendChild(nameEl);
+      var x = mk('button', 'dsx-attach-x', '×');
+      x.type = 'button';
+      x.title = '移除';
+      x.addEventListener('click', function () {
+        attached = attached.filter(function (a) { return a.id !== img.id; });
+        renderAttach();
+        updateComposerState();
+      });
+      box.appendChild(x);
+      U.attach.appendChild(box);
+    });
+  }
+
+  function addImage(m) {
+    if (attached.length >= 6) { showNotice('warn', '一条消息最多带 6 张图片'); return; }
+    var idx = m.dataUrl.indexOf(',');
+    attached.push({
+      id: m.id,
+      name: m.name || 'image',
+      mediaType: m.mediaType,
+      dataUrl: m.dataUrl,
+      data: idx >= 0 ? m.dataUrl.slice(idx + 1) : m.dataUrl,
+    });
+    renderAttach();
+    updateComposerState();
+  }
+
   function autoGrow() {
     U.input.style.height = 'auto';
     var h = Math.min(U.input.scrollHeight || 24, 220);
@@ -2349,15 +2400,23 @@
 
   function doSend() {
     var text = U.input.value.trim();
-    if (!text) {
+    var imgs = attached;
+    if (!text && !imgs.length) {
       if (S.running) { post({ type: 'cancel' }); return; }
       return;
     }
     if (!S.connected) { showNotice('warn', '未连接到 dsh runtime，消息未发送'); return; }
     var payload = { type: 'prompt', text: text, content: [{ type: 'text', text: text }] };
+    if (imgs.length) {
+      payload.images = imgs.map(function (i) {
+        return { mediaType: i.mediaType, data: i.data, name: i.name };
+      });
+    }
     if (S.running) payload.mode = 'queue';
     post(payload);
     U.input.value = '';
+    attached = [];
+    renderAttach();
     autoGrow();
     updateComposerState();
     if (S.running) showNotice('info', '已排队，将在下一轮发送');
@@ -2371,6 +2430,9 @@
         doSend();
       }
     });
+    if (U.btnImage) {
+      U.btnImage.addEventListener('click', function () { post({ type: 'pick-image' }); });
+    }
     U.btnSend.addEventListener('click', function () {
       if (S.running && !U.input.value.trim()) { post({ type: 'cancel' }); return; }
       doSend();
@@ -2444,6 +2506,8 @@
       case 'changes': renderChanges(msg.changes); break;
       case 'diff': applyDiff(msg.diff); break;
       case 'notice': showNotice(msg.level, msg.text); break;
+      case 'image-picked': addImage(msg); break;
+      case 'image-error': showNotice('warn', msg.text); break;
       case 'auth-needed': {
         S.authNeeded = str(msg.reason, 'disconnected');
         S.connected = false;

@@ -7,6 +7,8 @@
  * - panel.ts     只负责 webview 载体
  */
 
+import * as path from 'node:path';
+
 import * as vscode from 'vscode';
 
 import type { DshConfig } from '../config';
@@ -174,6 +176,10 @@ export class ChatController implements ChatHost {
         await this.insertFileReference(msg.query);
         return;
       }
+      case 'pick-image': {
+        await this.pickImage();
+        return;
+      }
       case 'prompt': {
         // 编辑器上下文：用户开着「把当前文件/选区/报错一起发」时，拼在消息前面
         if (this.config.sendWorkspaceContext) {
@@ -248,7 +254,8 @@ export class ChatController implements ChatHost {
     }
   }
 
-  private async insertFileReference(query?: string): Promise<void> {    const files = await vscode.workspace.findFiles(
+  private async insertFileReference(query?: string): Promise<void> {
+    const files = await vscode.workspace.findFiles(
       query && query.trim() ? `**/*${query.trim()}*` : '**/*',
       '**/node_modules/**',
       200,
@@ -276,6 +283,53 @@ export class ChatController implements ChatHost {
       level: 'info',
       text: `已把 ${rel} 的内容放进剪贴板（消息里可以先写 @${rel}）`,
     });
+  }
+
+  /**
+   * 选图片 → 读成 base64 回传给 webview 做缩略图。
+   * 只做读取，不碰 dsh；真正发送在 core.sendPrompt 里拼成 image part。
+   */
+  private async pickImage(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      canSelectFiles: true,
+      canSelectFolders: false,
+      openLabel: '附到这条消息',
+      filters: { 图片: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+    });
+    if (!picked?.length) return;
+
+    for (const uri of picked) {
+      const name = path.basename(uri.fsPath);
+      try {
+        const buf = await vscode.workspace.fs.readFile(uri);
+        if (buf.byteLength > MAX_IMAGE_BYTES) {
+          this.broadcast({
+            type: 'image-error',
+            text: `${name} 有 ${(buf.byteLength / 1024 / 1024).toFixed(1)} MB，超过 ${MAX_IMAGE_BYTES / 1024 / 1024} MB 上限，没有附上。`,
+          });
+          continue;
+        }
+        const mediaType = mediaTypeOf(name);
+        if (!mediaType) {
+          this.broadcast({ type: 'image-error', text: `${name} 不是支持的图片格式。` });
+          continue;
+        }
+        this.broadcast({
+          type: 'image-picked',
+          id: `img-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          name,
+          mediaType,
+          dataUrl: `data:${mediaType};base64,${Buffer.from(buf).toString('base64')}`,
+          bytes: buf.byteLength,
+        });
+      } catch (e) {
+        this.broadcast({
+          type: 'image-error',
+          text: `读不到 ${name}：${(e as Error).message}`,
+        });
+      }
+    }
   }
 
   onWebReady(): void {
@@ -416,6 +470,22 @@ export class ChatController implements ChatHost {
   }
 }
 
+
+/** 单张图片上限：dsh 端也要吃下 base64，超过这个就别硬塞了 */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+const IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+
+function mediaTypeOf(name: string): string | undefined {
+  return IMAGE_TYPES[path.extname(name).toLowerCase()];
+}
 
 /**
  * 把「取不到 diff」翻译成用户能懂的话。

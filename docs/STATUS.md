@@ -1,9 +1,20 @@
 # 当前状态与验收矩阵
 
-> 最后一次更新：2026-10-27 00:30
-> 版本：`local.dsh-vscode-0.2.0`（vsix 115.6 KB，sha256:62cec725b3b699aa）
+> 最后一次更新：2026-10-27 01:40
+> 版本：`local.dsh-vscode-0.2.1`（vsix 96.8 KB，sha256:198e6933791b26cf）
 
-## 0.2.0 新增（本轮）
+## 0.2.1 新增
+
+| 能力 | 说明 |
+| --- | --- |
+| 图片附件 | composer 左侧「图片」按钮 → 多选 png/jpg/jpeg/gif/webp/bmp → 缩略图条 → 随消息以 `PromptContentPart{type:'image'}` 发出；单张上限 8MB，一次最多 6 张 |
+| 会话被占用自动接续 | 命中 `session/writer-held`（同一条会话被别的 DSH 窗口占着写）时，自动沿用同一工作目录新建会话并重发，提示「原会话正被占用，已在新会话里继续」 |
+| composer 去掉边框 | 按用户偏好，输入框不再画任何边框（含内联 `!important` 兜底，绕过 webview 的 CSS 缓存） |
+| `npm run build` 不再依赖 esbuild JS API | 改为直接调原生 `esbuild.exe`（受限沙箱里 `spawn` 配管道会 EPERM）；`npm run install:local` 一次装完默认 + 所有 profile，并自动把旧版本目录挪进 `.smoke-tmp/ext-backup-*` |
+
+**安装陷阱（这次踩过）**：`code --install-extension` 升级时不会删旧版本目录，VS Code 可能仍从 `local.dsh-vscode-0.1.0` 加载旧代码——改了半天样式不生效就是这个原因。`npm run install:local` 已经把这一步自动化。
+
+## 0.2.0 新增
 
 | 能力 | 实现 | 验证 |
 | --- | --- | --- |
