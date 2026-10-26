@@ -1458,8 +1458,9 @@ body {
   gap: 4px;
 }
 
-.dsx-composer:focus-within {
-  border-color: var(--dsx-focus);
+/* 聚焦不画框：只靠光标提示（用户偏好，2026-10-27 定） */
+.dsx-composer .dsx-input:focus-visible {
+  outline: 0;
 }
 
 .dsx-input {
