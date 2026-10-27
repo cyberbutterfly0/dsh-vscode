@@ -109,7 +109,7 @@ dsh 的会话写锁是**内核级**的（Windows 命名信号量 / POSIX `flock`
 
 最省事的办法是用一个启动器：起 dsh → 抓 token → 写进 `~/.dsh/logs/last-launch.url` → 扩展开机自动读。
 
-`tools/` 下放了三份 Windows 脚本，**但请先读 [docs/launcher.md](docs/launcher.md)**。那份文档讲清楚了：
+`tools/` 下放了三份 Windows 脚本，**但请先读 [docs/launcher.md](https://github.com/cyberbutterfly0/dsh-vscode/blob/main/docs/launcher.md)**。那份文档讲清楚了：
 
 - 为什么需要它（token 机制、扩展看不见终端）
 - 它和扩展的分工边界（谁清实例、谁负责重连）
