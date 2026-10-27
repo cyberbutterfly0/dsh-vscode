@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 
 import type { DshConfig } from '../config';
-import { workspaceCwd } from '../config';
+import { workspaceCwd, resolveAttachUrl } from '../config';
 import { t } from '../i18n';
 import type { Logger } from '../log';
 import type { HostToWeb, WebToHost } from '../protocol';
@@ -38,6 +38,7 @@ export class ChatController implements ChatHost {
       config: {
         mode: this.config.mode,
         attachUrl: this.config.attachUrl,
+        launchFile: this.config.launchFile,
         cliPath: this.config.cliPath,
         extraSpawnArgs: this.config.extraSpawnArgs,
         startTimeoutMs: this.config.startTimeoutMs,
@@ -92,7 +93,7 @@ export class ChatController implements ChatHost {
     this.host = ChatPanel.existing ?? ChatPanel.show(this.context, this);
     this.setTitle(this.core.state.title || t('chat.title'));
     if (!this.core.state.connected) {
-      void this.core.connect({ attachUrl: this.config.attachUrl || undefined }).catch((e: Error) => {
+      void this.core.connect({ attachUrl: resolveAttachUrl() || undefined }).catch((e: Error) => {
         this.logger('error', '首次连接失败', e.message);
       });
     } else {
@@ -113,6 +114,7 @@ export class ChatController implements ChatHost {
     await this.core.applyConfig({
       mode: config.mode,
       attachUrl: config.attachUrl,
+      launchFile: config.launchFile,
       cliPath: config.cliPath,
       extraSpawnArgs: config.extraSpawnArgs,
       autoStart: config.autoStart,
@@ -335,7 +337,7 @@ export class ChatController implements ChatHost {
   onWebReady(): void {
     // 侧栏视图可能是整个扩展里第一个挂载的 webview，这里要能自己把连接拉起来
     if (!this.core.state.connected) {
-      void this.core.connect({ attachUrl: this.config.attachUrl || undefined }).catch((e: Error) => {
+      void this.core.connect({ attachUrl: resolveAttachUrl() || undefined }).catch((e: Error) => {
         this.logger('warn', '侧栏视图初始化连接失败', e.message);
       });
       return;
@@ -395,9 +397,27 @@ export class ChatController implements ChatHost {
     await this.refreshTree?.();
   }
 
+  /** 现在能不能让位（见 SessionCore.canYield） */
+  canYield(): boolean {
+    return this.core.canYield();
+  }
+
+  /**
+   * 让位：停掉内置 runtime，把会话写锁交还给别的 dsh 客户端。
+   * 回到扩展后任何操作都会自动重连（core.handle 开头那段）。
+   */
+  async yieldRuntime(): Promise<void> {
+    const before = this.core.state.connected;
+    await this.core.yieldRuntime();
+    if (before && !this.core.state.connected) {
+      this.broadcast({ type: 'notice', level: 'info', text: t('ext.yielded') });
+    }
+    await this.refreshTree?.();
+  }
+
   async ensureConnected(): Promise<void> {
     if (this.core.state.connected) return;
-    await this.core.connect({ attachUrl: this.config.attachUrl || undefined });
+    await this.core.connect({ attachUrl: resolveAttachUrl() || undefined });
   }
 
   /**

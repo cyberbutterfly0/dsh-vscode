@@ -2,7 +2,7 @@
   "name": "dsh-vscode",
   "displayName": "DSH for VS Code",
   "description": "把 DeepSeek Harness (dsh) 接进 VS Code：自绘聊天面板 + 一键切换完整 dsh Web UI。",
-  "version": "0.2.2",
+  "version": "0.4.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -45,6 +45,11 @@
       {
         "command": "dsh.disconnect",
         "title": "断开连接",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.yieldRuntime",
+        "title": "让位：停掉内置 dsh（把会话让给浏览器）",
         "category": "DSH"
       },
       {
@@ -205,11 +210,11 @@
             "attach"
           ],
           "enumDescriptions": [
-            "优先复用记忆的连接；没有则启动内置 runtime",
-            "总是自己启动 dsh web --port 0 --no-open",
-            "总是连接已有实例（需要 tokenized URL）"
+            "默认。只连你自己起的 dsh，连不上就报错，绝不偷偷再起一个。多开 VS Code 窗口也不会互相抢会话。",
+            "扩展自己起一个 dsh 进程并连它。会额外持有一份会话写锁，切回浏览器可能报「会话已被占用」。每次重载窗口都会起新进程，除非 dsh.stopOnExit 为真。",
+            "先试连你自己起的 dsh，连不上再自己起一个。"
           ],
-          "default": "auto",
+          "default": "attach",
           "description": "runtime 获取方式。"
         },
         "dsh.cliPath": {
@@ -220,7 +225,12 @@
         "dsh.attachUrl": {
           "type": "string",
           "default": "",
-          "description": "已有实例的 tokenized URL，例如 http://127.0.0.1:3080/?token=xxx。建议用「DSH: 连接已有实例」命令填写。"
+          "description": "直接连一个已经跑着的 dsh，形如 http://127.0.0.1:3080/?token=xxxx。留空则自动读 dsh.launchFile 里启动器写的 URL。写在工作区设置（.vscode/settings.json）里的值优先于全局值——双实例模式下让每个项目各连一个实例就靠这个。"
+        },
+        "dsh.launchFile": {
+          "type": "string",
+          "default": "",
+          "description": "启动器（dsh-launch.ps1）写的 token URL 文件，第一行是 http://127.0.0.1:PORT/?token=...。留空则用 ~/.dsh/logs/last-launch.url。双实例模式下第二个实例的 URL 由启动器写在 last-launch-3081.url，需要该项目的 dsh.attachUrl 指过去。"
         },
         "dsh.autoStart": {
           "type": "boolean",
@@ -297,6 +307,23 @@
           "default": false,
           "description": "关闭 VS Code 时是否顺带杀掉扩展自己启动的 dsh 进程。连的是别人启动的实例时永远不动。"
         },
+        "dsh.yieldOnBlur": {
+          "type": "boolean",
+          "default": false,
+          "description": "VS Code 窗口失焦一段时间后，自动停掉扩展自己启动的 dsh，把会话写锁让给浏览器。只在 spawn 模式下有意义；attach 模式没有自己的 runtime 可让。"
+        },
+        "dsh.yieldDelayMs": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 5000,
+          "maximum": 600000,
+          "description": "失焦多久之后让位（毫秒）。调太小会频繁重启 dsh。"
+        },
+        "dsh.yieldResumeOnFocus": {
+          "type": "boolean",
+          "default": true,
+          "description": "重新聚焦 VS Code 时，自动把让位时停掉的 dsh 重新启动并连上。"
+        },
         "dsh.env": {
           "type": "object",
           "default": {},
@@ -336,6 +363,3 @@
   },
   "homepage": "https://github.com/cyberbutterfly0/dsh-vscode#readme"
 }
-
-
-

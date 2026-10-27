@@ -1,18 +1,45 @@
 /**
- * 检查 .dsh-token.txt 里的实例还能不能用。
+ * 检查某个 dsh 实例的 token 还能不能用。
  * 只做三步：探端口 → GET / 看是否 401 → GET /connect 换 cookie → POST session/list。
- * 用法: node scripts/check-token.mjs [tokenFile]
+ *
+ * 用法: node scripts/check-token.mjs [file]
+ *
+ * 支持两种输入格式，缺省读启动器写的 ~/.dsh/logs/last-launch.url：
+ *   1. URL 文件（启动器产物）：第一行是 http://127.0.0.1:<port>/?token=<token>
+ *   2. KEY=VALUE 文件：PORT=… / TOKEN=… / URL=…
  */
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 
-const file = process.argv[2] || 'E:/dsh结算/vscde/.dsh-token.txt';
+const file = process.argv[2] || path.join(os.homedir(), '.dsh', 'logs', 'last-launch.url');
 const raw = fs.readFileSync(file, 'utf8');
-const pick = (k) => (raw.match(new RegExp(`^${k}=(.*)$`, 'm')) || [])[1]?.trim();
-const port = Number(pick('PORT'));
-const token = pick('TOKEN');
-const url = pick('URL');
+
+let port = 0;
+let token = '';
+let url = '';
+
+const urlMatch = raw.match(/https?:\/\/[^\s]+/);
+if (urlMatch) {
+  url = urlMatch[0];
+  const parsed = new URL(url);
+  port = Number(parsed.port || 3080);
+  token = parsed.searchParams.get('token') || '';
+  if (!token) {
+    console.error(`URL 里没有 token 参数：${url}`);
+    process.exit(1);
+  }
+} else {
+  const pick = (k) => (raw.match(new RegExp(`^${k}=(.*)$`, 'm')) || [])[1]?.trim();
+  port = Number(pick('PORT'));
+  token = pick('TOKEN') || '';
+  url = pick('URL') || '';
+  if (!port || !token) {
+    console.error('文件里既没有 URL，也没有 PORT=/TOKEN= —— 不是启动器产物，也不是 .dsh-token.txt');
+    process.exit(1);
+  }
+}
 console.log(`文件 ${file}`);
 console.log(`  PORT=${port}  TOKEN=${token ? token.slice(0, 8) + '…(' + token.length + ')' : '(缺失)'}`);
 

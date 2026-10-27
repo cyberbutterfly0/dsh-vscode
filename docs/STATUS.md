@@ -1,8 +1,64 @@
 # 当前状态与验收矩阵
 
-> 最后一次更新：2026-10-27 01:50
-> 版本：`local.dsh-vscode-0.2.2`（vsix 98.1 KB，sha256:b9e50d937e1634e3）
+> 最后一次更新：2026-10-28 00:35
+> 版本：`local.dsh-vscode-0.3.0`
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
+## 0.3.0：连你自己起的 dsh，而不是自己再起一个
+
+| 变更 | 说明 |
+| --- | --- |
+| `dsh.mode` 默认 `spawn` → `attach` | 根因：会话写锁是**内核级**的（Windows 命名信号量 / POSIX flock），一个会话同时只能被一个 dsh 进程写。扩展自己 spawn 就必然和浏览器的 3080 抢锁，回浏览器必报 `session/writer-held` |
+| 新增 `dsh.launchFile` | 默认 `~/.dsh/logs/last-launch.url`，读第一行的完整 token URL。`attachUrl` 非空时优先用它 |
+| `dsh.yieldOnBlur` 默认 `true` → `false` | attach 模式没有自己的 runtime 可让；spawn 模式自动杀进程会让用户「聊到一半窗口消失」。让位降级为手动命令 `dsh.yieldRuntime` |
+| attach 模式不再弹「粘贴 URL」 | `doConnect` 的 catch 里，`attach` + 配了 `launchFile` 时只报错误文本、不发 `auth-needed` —— 这时该做的是去点启动器 |
+| 启动器 v4 | `dsh-launch.ps1` 重写：互斥锁 `Local\dsh-launch-lock`、扫全系统 `node.exe` 命令行匹配 `dsh[\\/]lib[\\/]bin\.js`、token 有效就复用、自检实例数 ≤1、写 `last-launch.url` 与 `dsh-instances.json`，支持 `-DryRun`/`-NoRestart`/`-NoOpen` |
+| 新增 `dsh-status.ps1` / `.bat` | 只读盘点：PID/端口/启动时间/内存/健康/父进程 + 结论 + token 文件状态 + VS Code 扩展记录的实例 |
+| `dsh-recover.ps1` 补写 token 文件 | 启动成功后从 stdout 日志抓 `dsh web:` URL 写进 `last-launch.url`。以前它写日志、启动器写 `%TEMP%`，两处不同步，扩展会读到过期 token |
+
+**PowerShell 编码铁律**（这次踩的）：含中文的 `.ps1` 必须 UTF-8 **带 BOM**（5.1 无 BOM 会按 ANSI 读）；`.bat` 必须 CRLF 且**无 BOM**；`dsh-recover.ps1` 保持纯 ASCII。
+**5.1 兼容坑**：Windows PowerShell 5.1 的标量对象没有 `.Count` 属性，`$procs.Count` 恒为空串 → 全部改成 `@($procs).Count`。
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
+## 0.2.3 新增：让位（yield）
+
+| 能力 | 说明 |
+| --- | --- |
+| 失焦自动让位 | 窗口失焦 `dsh.yieldDelayMs`（默认 20s）后自动停掉扩展自己 spawn 的 dsh，把**内核级**会话写锁交还出去；`taskkill /T /F` 杀进程树（`runtime.ts:164 killTree`） |
+| 聚焦自动接回 | 重新聚焦时 `ensureConnected()` 重启 dsh，并靠 `doConnect()` 末尾新增的 `reopenFollow()` 重新订阅当前会话 |
+| 手动让位命令 | `dsh.yieldRuntime`（命令面板 `DSH: 让位：停掉内置 dsh`） |
+| 让位后自动重连 | `SessionCore.handle` 开头：连接已断且消息不是纯 UI 类时，先 `connect()` 再处理，所以发一条消息就能接着聊 |
+| 关窗口即释放 | `deactivate` 由「只有 `dsh.stopOnExit` 才杀」改为「`stopOnExit` 或 `yieldOnBlur` 为真就杀」，修掉关掉 VS Code 后浏览器仍报 `session/writer-held` 的问题 |
+| 三态保护 | 正在跑回合（`running`）、attach 别人的实例（`!spawnedByUs`）、`yieldOnBlur=false` 时都不让位 |
+
+新增配置：`dsh.yieldOnBlur`(true) / `dsh.yieldDelayMs`(20000, 5000–600000) / `dsh.yieldResumeOnFocus`(true)。
+新增 `UI_ONLY_MESSAGES` 集合（`ready/close-session/copy/open-link/open-file/pick-image/cancel-ask/insert-file-reference/open-full-ui/pick-cwd`），避免纯 UI 动作触发 runtime 重启。
+
+**根因记录**：`dsh-session-persistence-jsonl/lib/index.js:617-646` 的 lease 注释写明锁由内核仲裁（POSIX `flock` / Windows 命名信号量），「A live but wedged holder keeps the lock until its process exits: there is deliberately no expiry」；`dsh-api-session-controller/lib/index.js:243` 把 `SessionAlreadyOwnedError` 映射成 `RemoteError("session/writer-held")`。web API 没有关闭会话的端点，所以**释放锁唯一手段就是让持有进程退出**——这就是"让位"必须杀进程、不能只断 WebSocket 的原因。
+
+**待真机验证**：扩展激活期间 dsh 重启后，`sessions[0]`（按 updatedAt 排序）是否稳定就是刚聊的那个会话；若顺序漂移，需要把 `sessionId` 持久化到 `instances.json`。
+
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 0.2.2 新增
 
 | 能力 | 说明 |
@@ -12,6 +68,14 @@
 
 未验证：VS Code webview 的 `paste` 事件能否拿到剪贴板图片，需在真窗口里试一次（不行就要查 webview 是否吞掉了 paste）。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 0.2.1 新增
 
 | 能力 | 说明 |
@@ -23,6 +87,14 @@
 
 **安装陷阱（这次踩过）**：`code --install-extension` 升级时不会删旧版本目录，VS Code 可能仍从 `local.dsh-vscode-0.1.0` 加载旧代码——改了半天样式不生效就是这个原因。`npm run install:local` 已经把这一步自动化。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 0.2.0 新增
 
 | 能力 | 实现 | 验证 |
@@ -37,6 +109,14 @@
 
 **已知边界（重要）**：`changes.summary` 只活在 dsh 进程内存里。进程重启或换了实例后，旧轮次一律 404——所以原生 diff 只覆盖**当前 runtime 进程内**发生过的轮次。取不到时会给「这一轮的改动数据已经失效」的提示，而不是空白 diff。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 一、已真机验证（跑通）
 
 | 能力 | 验证方式 | 结果 |
@@ -59,6 +139,14 @@
 | **侧栏聊天视图** | 隔离实例 + `dsh.openViewOnStart` | `view.log` 出现 `cmd-start → container-open → resolve → focus-ok → ready`；真窗口截图里侧栏「DSH」容器正常渲染聊天（工具卡 + 改动卡片 + composer + 用量条）与会话列表 |
 | **编辑器右键入口** | 真窗口：选中代码 → 右键 | 菜单出现「把选中的代码发给 DSH」「就当前文件问 DSH」；点前者弹出输入框并正确带出 `文件:1-5` 行号 |
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 二、未验证 / 待补
 
 1. **多窗口共享**：一个 token 只允许一条 mux；已实现 409 时换凭据接管（409 有 60 秒冷却，401 不冷却、连续 3 次失败就停），但两个 VS Code 窗口同时连的真实场景没跑过。
@@ -66,6 +154,14 @@
 3. `coarse` diff（只有整文件 before/after、没有 hunks）目前只提示「行级对比不可用」，没在本地算行级差异。
 4. 编辑器上下文里的文件路径：没打开工作区文件夹时会退回绝对路径（`e:\dsh结算\vscde\.smoke-tmp\ws\src.ts`），打开文件夹后是相对路径。可优化成始终用文件名。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 二·附、编辑器侧入口怎么用
 
 - 默认**不**自动带上下文（`dsh.sendWorkspaceContext` 默认 false），因为每轮都带会明显吃 token。
@@ -73,18 +169,42 @@
 - 想按需带：编辑器里选中代码 → 右键「把选中的代码发给 DSH」→ 补一句想问什么 → 自动打开聊天并发送；或右键「就当前文件问 DSH」。
 - 想从文件树带：资源管理器里右键文件 →「就当前文件问 DSH」。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 二·附二、审批链路的坑（重要，别再踩）
 
 `openSession()` 原来调 `closeStreams()`，而它会连带关掉**连接级**的全局流 `session/control`（投影）和 `$events`（审批/提问）—— 换一次会话，之后就再也收不到 `approval/request`，外部表现就是「工具卡一直运行中、没有审批弹窗」。
 现在拆成 `closeFollow()`（只关会话级 follow），换会话不动全局流；`openSession` 里若发现全局流缺失还会补开。
 排查时靠 `core.onEventsFrame` 的两行日志确认通道活着：`$events 就绪 clientId=…` 和 `$events emit <name>`。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 三、已知缺陷
 
 - 老会话可能返回 `session/writer-held`：`core.sendPrompt` 会自动重开 follow 重试一次，二次失败现在给的是中文提示（「这条会话被另一个窗口或进程占着写句柄…新建一个会话继续」）。跨进程的写所有权不释放，**换新会话即可**。
 - `media/chat.js` 在「会话已选中但记录为空」时显示「开始对话」空态，容易被误认为没打开会话。
 - 改动卡片的展开状态不保留：同一轮 `changes` 被覆盖重建时会收起。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 四、聊天视图（侧栏）
 
 - 除编辑器 tab 外，另注册视图 `dsh.chatView`（`type: webview`，挂在 `dshContainer` 活动栏容器，`visibility: visible`）。
@@ -93,6 +213,14 @@
 - 一键定位：命令面板搜 `dsh: 打开侧栏聊天`（`dsh.openChatView`）。
 - 排查：`~/.dsh/dsh-vscode/view.log` 记录 `resolve` / `ready`；没有这个文件说明视图压根没被创建（容器没展开，或 `package.json` 的视图声明没生效）。
 
+## 0.4.0：按项目隔离 + 堵住进程自增
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| 工作区级 `dsh.attachUrl` | 已实现 | `config.ts` 的 `resolveAttachUrl()`：`inspect()` 取 workspace 值，优先于全局 |
+| 退出无条件回收 runtime | 已实现 | `extension.ts` `deactivate` 里 `killRuntime: true`；attach 模式 `spawnedByUs=false` 所以不误杀 |
+| 启动器 A/B 模式 | 已实现 | `dsh-launch.ps1` v5：启动时选单实例/双实例，双实例额外写 `last-launch-3081.url` |
+| 双实例下插件冲突 | 已知限制 | task-board 这类单例插件只有一个实例能用 |
 ## 五、开发命令
 
 ```bash

@@ -17,7 +17,7 @@ dsh --version
 
 ```powershell
 # 从 Releases 下载 dsh-vscode-0.1.0.vsix 后
-code --install-extension dsh-vscode-0.2.2.vsix
+code --install-extension dsh-vscode-0.3.0.vsix
 
 # 或自己打一份
 npm install
@@ -50,6 +50,20 @@ npm run install:local            # 默认 profile + 所有 profile 一次装完�
 | 发图片 | 直接在输入框里 `Ctrl+V` 粘贴（截图工具复制的图即可），或把图片拖进来；也可以用底部左侧的 `图片` 按钮选文件。缩略图排在输入框上方，随消息一起发出 |
 | 会话被别的窗口占用 | 不用管：会自动新建同目录会话继续，聊天里给一条提示 |
 
+### 0.3.0 起：默认连你自己起的 dsh（attach）
+
+以前扩展会自己起一个 dsh，结果浏览器和 VS Code 各跑一个进程，回浏览器打开同一个会话就报「当前会话已被占用」。
+
+0.3.0 把 `dsh.mode` 默认值改成 `attach`：
+
+1. 点一次 **DSH 启动器**（`dsh-launch.bat`）。它会盘点并清掉所有残留的 dsh 进程，起一个新的 3080，再把带 token 的 URL 写进 `~/.dsh/logs/last-launch.url`
+2. 在 VS Code 里发消息，扩展读那个文件拿 token 连上去
+
+两边连的是**同一个 dsh 进程**，所以浏览器和 VS Code 看到的是同一份会话，不再互相锁。
+
+- 启动器还会写 `~/.dsh/logs/dsh-instances.json`（当前实例清单），VS Code 扩展只读不杀进程
+- 不确定自己开了几个 dsh 就双击 `dsh-status.bat`，它会列出所有实例、端口、内存、token 文件是否有效
+- `dsh.launchFile` 可改；`dsh.attachUrl` 一旦填了就优先用它，不再读文件
 ### 连接方式
 
 `dsh.mode` 三种：
@@ -60,6 +74,50 @@ npm run install:local            # 默认 profile + 所有 profile 一次装完�
 
 凭据存在 `~/.dsh/dsh-vscode/instances.json`。多人共用一个 dsh 实例时，同一个 cookie 只能开一条连接，所以**同一时间只有一个窗口真正连着**。
 
+### 让位：在 VS Code 和浏览器之间来回切
+
+dsh 的会话写锁是**内核级**的（Windows 命名信号量 / POSIX `flock`），绑在持有它的进程上——进程不死，锁就不放。所以只要扩展自己起的那个 dsh 还活着，你在浏览器里打开同一个会话就会看到：
+
+> 当前会话已被占用，可能是其他正在运行的 DSH 导致的（如其他 dsh web、桌面端），请退出其他正在运行的 DSH 后重试。
+
+0.2.3 起有了「让位」：
+
+- **失焦自动让位**：窗口失去焦点 `dsh.yieldDelayMs`（默认 20 秒）后，自动停掉扩展自己起的 dsh，把锁交出去。
+- **回到窗口自动接回**：重新聚焦时重启 dsh 并重新订阅当前会话。
+- **手动让位**：命令面板执行 `DSH: 让位`。
+- **退出即让位**：关 VS Code 时也会停掉自己起的 dsh（`dsh.yieldOnBlur` 开着时）。
+
+三种情况不让位：正在跑回合（免得打断对话）、连的是别人的实例（没进程可杀）、`dsh.yieldOnBlur` 关掉了。
+
+代价是每次让位都会丢掉 dsh 进程内的状态，回来时要重新加载插件（约 2–3 秒）。觉得太频繁就把 `dsh.yieldDelayMs` 调大。
+
+### 0.4.0：一个项目连一个实例
+
+双实例模式（启动器里选 2）时，两个项目各连一个 dsh：
+
+```json
+// <项目>/.vscode/settings.json
+{ "dsh.attachUrl": "http://127.0.0.1:3081/?token=xxxxx" }
+```
+
+**工作区设置优先于全局设置**，全局的 `dsh.attachUrl` 留空即可。启动器起来后会把两个实例的 URL 都打印出来。
+
+0.4.0 同时修掉一个会让进程越攒越多的 bug：扩展退出时**无条件回收自己 spawn 的 runtime**。之前按 `stopOnExit` 决定，而它默认 false，导致每重载一次窗口就留一个孤儿进程（有人攒到过 22 个、1.9 GB）。attach 模式下扩展没有自己 spawn 的进程，这个改动不会误杀启动器起的实例。
+## 启动器（可选，但强烈建议）
+
+扩展自己**不会启动 dsh**（0.3.0 起默认 attach）。它必须拿到一个带 token 的 URL 才能连上，而这个 token 只在 dsh 启动时打印一次。
+
+最省事的办法是用一个启动器：起 dsh → 抓 token → 写进 `~/.dsh/logs/last-launch.url` → 扩展开机自动读。
+
+`tools/` 下放了三份 Windows 脚本，**但请先读 [docs/launcher.md](docs/launcher.md)**。那份文档讲清楚了：
+
+- 为什么需要它（token 机制、扩展看不见终端）
+- 它和扩展的分工边界（谁清实例、谁负责重连）
+- 不用它的最小做法（手动填 `dsh.attachUrl`）
+- 为什么必须只有一个 dsh 实例（内核级会话写锁 + 单例插件会整体不激活）
+- 双实例怎么配，代价是什么
+
+一句话：启动器只是「把 token 递过来 + 清理多余实例」的自动化，不是运行时依赖，脚本是给你按自己机器改的。
 ## 配置
 
 | 键 | 说明 |
@@ -77,6 +135,9 @@ npm run install:local            # 默认 profile + 所有 profile 一次装完�
 | `dsh.fullUiZoom` | `1` | 完整 dsh UI（iframe）缩放，0.5–1.5 |
 | `dsh.startTimeoutMs` | `45000` | 等 dsh 打印地址的超时（毫秒） |
 | `dsh.stopOnExit` | `false` | 关 VS Code 时是否杀掉自己启动的 dsh |
+| `dsh.yieldOnBlur` | `true` | 失焦一段时间后自动让位，把会话写锁交还给浏览器 |
+| `dsh.yieldDelayMs` | `20000` | 失焦多久之后让位（毫秒，最小 5000） |
+| `dsh.yieldResumeOnFocus` | `true` | 重新聚焦时自动重启 dsh 并接回当前会话 |
 | `dsh.env` | `{}` | 追加给 dsh 进程的环境变量 |
 
 ## 出问题怎么办

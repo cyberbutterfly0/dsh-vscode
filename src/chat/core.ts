@@ -33,6 +33,8 @@ import type {
 export interface CoreConfig {
   mode: ConnectMode;
   attachUrl: string;
+  /** 启动器写的 token URL 文件；attachUrl 为空时从这里读 */
+  launchFile: string;
   cliPath: string;
   extraSpawnArgs: string[];
   /** spawn 后等 URL 的超时 */
@@ -71,6 +73,8 @@ export class SessionCore {
   private sessionTitle: string | undefined;
   private sessionCwd: string | undefined;
   private running = false;
+  /** 正在让位：这期间的断开是主动的，别当成掉线去弹授权提示 */
+  private yielding = false;
   private asks = new Map<string, UiAsk>();
   private projections: Record<string, JsonValue> = {};
   private followHandle: { close(): void } | undefined;
@@ -191,12 +195,16 @@ export class SessionCore {
       const { connection, result } = await DshConnection.open({
         mode,
         attachUrl: attachUrl || undefined,
+        // attach 模式下 attachUrl 常常是空的，真正的 URL 在启动器写的文件里
+        launchFile: cfg.launchFile,
         cliPath: cfg.cliPath || undefined,
         extraSpawnArgs: cfg.extraSpawnArgs,
         startTimeoutMs: cfg.startTimeoutMs,
         env: cfg.env,
         logger: this.opts.logger,
         onMuxState: (state, detail) => {
+          // 让位是有意断开，别把它当成掉线（否则 UI 会弹"需要重新粘贴 URL"）
+          if (this.yielding) return;
           if (state === 'reconnecting') {
             this.opts.post({ type: 'status', connected: false, running: this.running, detail });
           } else if (state === 'closed') {
@@ -216,6 +224,9 @@ export class SessionCore {
       if (!this.sessionId) {
         const first = this.sessions[0];
         if (first && !first.blank) await this.openSession(first.sessionId);
+      } else {
+        // 让位后重连：会话 id 还在，但 follow 流随着旧进程一起没了，重新订阅一遍
+        await this.reopenFollow();
       }
     } catch (e) {
       const err = e as Error;
@@ -226,6 +237,10 @@ export class SessionCore {
           level: 'warn',
           text: '另一个窗口正在使用这条 dsh 连接（一个 token 只能有一处连着）。关掉那个窗口，或点「重试连接」把连接抢过来。',
         });
+      } else if (cfg.mode === 'attach' && cfg.launchFile) {
+        // attach 模式没连上，几乎一定是「启动器还没点」或「dsh 已经退了」，
+        // 这时要用户粘 URL 是错的——该让他去点启动器。
+        this.opts.post({ type: 'notice', level: 'error', text: err.message });
       } else {
         this.opts.post({ type: 'auth-needed', reason: 'no-token' });
         this.opts.post({ type: 'notice', level: 'error', text: `连接 dsh 失败：${err.message}` });
@@ -1000,6 +1015,16 @@ export class SessionCore {
 
   /** webview 发来的消息里，跟 dsh 有关的那部分在这里处理；UI 相关的留给 controller。 */
   async handle(msg: WebToHost): Promise<boolean> {
+    // 让位之后（或连接意外断了），用户一操作就把 runtime 起回来。
+    // 纯 UI 消息不触发——只是点一下菜单不该 spawn 一个 dsh 进程。
+    if (!this.conn && !this.disposed && !UI_ONLY_MESSAGES.has(msg.type) && msg.type !== 'reconnect') {
+      try {
+        await this.connect();
+      } catch {
+        // connect 内部已经把失败原因 post 给 UI 了，这里吞掉避免二次报错
+        return true;
+      }
+    }
     switch (msg.type) {
       case 'ready':
         this.postInit();
@@ -1061,6 +1086,50 @@ export class SessionCore {
   }
 
   /**
+   * 能不能让位。三条同时成立才动：
+   * - 有连接；
+   * - 这个 dsh 是**我们自己 spawn** 的（attach 别人实例时没有进程可杀，也就没有锁可放）；
+   * - 当前没有活跃回合（杀进程会把正在跑的对话打断）。
+   */
+  canYield(): boolean {
+    const conn = this.conn;
+    if (!conn || this.disposed) return false;
+    if (!conn.spawnedByUs) return false;
+    if (this.running) return false;
+    return true;
+  }
+
+  /**
+   * 让位：停掉自己 spawn 的 dsh 进程，把会话写锁交还出去。
+   *
+   * 为什么必须杀进程而不是只断开：dsh 的会话写锁是**内核级**的
+   * （Windows 命名信号量 / POSIX flock，见 dsh-session-persistence-jsonl 的 lease 段），
+   * 绑在持有进程上，进程不死锁就不放。只断 WebSocket 的话，别的 dsh 客户端
+   * （浏览器里的 dsh web）打开同一会话会一直拿到 `session/writer-held`。
+   *
+   * 这是「在 VS Code 里聊完 → 回浏览器接着看/聊」能成立的前提。
+   */
+  async yieldRuntime(): Promise<void> {
+    const conn = this.conn;
+    if (!conn || !this.canYield()) return;
+    this.opts.logger('info', `让位：停止内置 runtime（${conn.authority}），释放会话写锁`);
+    this.yielding = true;
+    this.stopSessionRefresh();
+    this.closeStreams();
+    this.conn = undefined;
+    this.asks.clear();
+    this.askCtx.clear();
+    this.running = false;
+    this.activeAttempt = undefined;
+    this.opts.post({ type: 'status', connected: false, running: false, detail: 'yielded' });
+    try {
+      await conn.dispose({ killRuntime: true });
+    } finally {
+      this.yielding = false;
+    }
+  }
+
+  /**
    * 扩展退出时调用。
    * `killRuntime: true` 才杀掉我们自己 spawn 的 dsh——连的是别人的实例时永远不杀。
    */
@@ -1078,6 +1147,23 @@ export class SessionCore {
 }
 
 // ── 小工具 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 这些 webview 消息纯属 UI 层，不需要 dsh 连接。
+ * 让位之后用户点这些不该顺手把 runtime 又拉起来。
+ */
+const UI_ONLY_MESSAGES: ReadonlySet<WebToHost['type']> = new Set<WebToHost['type']>([
+  'ready',
+  'close-session',
+  'copy',
+  'open-link',
+  'open-file',
+  'pick-image',
+  'cancel-ask',
+  'insert-file-reference',
+  'open-full-ui',
+  'pick-cwd',
+]);
 
 /** `$events` 里 approval/request 的 request 形状（实测） */
 interface ApprovalRequest {

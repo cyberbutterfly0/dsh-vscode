@@ -278,7 +278,7 @@
 
   var T0 = Date.now() - 9 * 60 * 1000;
   var seq = 0;
-  var CWD = 'E:\\dsh结算\\vscde\\extension';
+  var CWD = 'C:\\workspace\\demo-project';
   var SESSION = 'sess-8f3a2c11';
 
   /** 造一条持久事件（records 里的元素和 {type:'event'} 共用） */

@@ -22,8 +22,10 @@ export type ConnectMode = 'auto' | 'spawn' | 'attach';
 
 export interface ConnectOptions {
   mode: ConnectMode;
-  /** attach 模式下的 URL（带 token）或裸 base */
+  /** attach 模式下的 URL（带 token）或裸 base；留空则去 launchFile 里找 */
   attachUrl?: string;
+  /** 启动器写的 token URL 文件；attachUrl 为空时从这里读 */
+  launchFile?: string;
   cliPath?: string;
   extraSpawnArgs?: string[];
   /** spawn 后等 URL 的超时 */
@@ -64,6 +66,27 @@ interface StoreFile {
 
 export function defaultStateFile(): string {
   return path.join(os.homedir(), '.dsh', 'dsh-vscode', 'instances.json');
+}
+
+/**
+ * 从启动器写的文件里取 token URL。
+ * 约定：第一行就是 URL，后面是 # 开头的注释。这里取第一个长得像 URL 的行，
+ * 这样即使有人在文件头上加了说明也不会炸。
+ */
+function readLaunchFile(file: string, logger: Logger): string | undefined {
+  try {
+    const text = fs.readFileSync(file, 'utf8');
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(/https?:\/\/\S+/);
+      if (m) return m[0];
+    }
+    logger('debug', `启动文件里没有 URL: ${file}`);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logger('debug', `读取启动文件失败: ${file}`, (e as Error).message);
+    }
+  }
+  return undefined;
 }
 
 function readStore(file: string, logger: Logger): StoreFile {
@@ -184,7 +207,16 @@ export class DshConnection {
     const store = readStore(stateFile, logger);
 
     // 1) 明确要接入的实例：先看有没有还能用的 cookie，避免 /connect 顶掉别人
-    const wanted = opts.attachUrl?.trim();
+    //    没给 URL 就去启动器写的文件里找——这样扩展永远连用户自己起的那个 dsh，
+    //    不会自己 spawn 出第二个进程去抢会话写锁。
+    let wanted = opts.attachUrl?.trim() || '';
+    if (!wanted && opts.launchFile) {
+      const fromFile = readLaunchFile(opts.launchFile, logger);
+      if (fromFile) {
+        logger('info', `从启动文件读到 ${fromFile.replace(/\?token=[^&]*/, '?token=***')}`);
+        wanted = fromFile;
+      }
+    }
     if (wanted) {
       const target = parseLaunchUrl(wanted);
       const base = target?.base ?? wanted.replace(/\/+$/, '');
@@ -270,9 +302,13 @@ export class DshConnection {
     }
     writeStore(stateFile, store, logger);
 
-    // 3) attach 模式但什么都没给：报错，让上层弹输入框
+    // 3) attach 模式但什么都没给：报错，让上层提示「先点启动器」
     if (opts.mode === 'attach') {
-      throw new Error('没有可连接的 dsh 实例。请在设置里填 dsh.attachUrl，或改用 spawn 模式。');
+      throw new Error(
+        opts.launchFile
+          ? `没有可连接的 dsh 实例：${opts.launchFile} 不存在或里面没有 URL。请先点一次 DSH 启动器，或者把 dsh.attachUrl 填上。`
+          : '没有可连接的 dsh 实例。请在设置里填 dsh.attachUrl，或改用 spawn 模式。',
+      );
     }
 
     // 4) spawn 自己的实例

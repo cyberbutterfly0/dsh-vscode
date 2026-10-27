@@ -21,6 +21,10 @@ let controller: ChatController | undefined;
 let sessionsView: SessionsView | undefined;
 let statusBar: vscode.StatusBarItem | undefined;
 let output: vscode.OutputChannel | undefined;
+/** 失焦后等待多久让位的定时器 */
+let yieldTimer: NodeJS.Timeout | undefined;
+/** 当前是不是已经让位（runtime 停了，等用户回来重连） */
+let yielded = false;
 
 function makeLogger(channel: vscode.OutputChannel, level: DshConfig['logLevel']): Logger {
   return createLogger(level, (line) => channel.appendLine(line));
@@ -112,6 +116,9 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   reg('dsh.disconnect', async () => {
     await controller?.disconnect();
+  });
+  reg('dsh.yieldRuntime', async () => {
+    await doYield();
   });
   reg('dsh.openFullUI', async () => {
     await openChat();
@@ -268,6 +275,35 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // ── 让位：失焦后停掉内置 runtime，把会话写锁让给别的 dsh ──────────────────
+  // dsh 的会话锁是内核级命名信号量（Windows）/ flock（POSIX），绑在持有进程上，
+  // 进程不死就不放。所以「在 VS Code 聊完 → 去浏览器接着看」的前提是让内置 dsh 退出。
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) {
+        clearYieldTimer();
+        if (!yielded || !readConfig().yieldResumeOnFocus) return;
+        yielded = false;
+        void controller
+          ?.ensureConnected()
+          .then(() => setStatusBar('normal'))
+          .catch((e: Error) => {
+            yielded = true;
+            setStatusBar('yielded');
+            logger('warn', '让位后重连失败', e.message);
+          });
+        return;
+      }
+      const cfg = readConfig();
+      if (!cfg.yieldOnBlur) return;
+      clearYieldTimer();
+      yieldTimer = setTimeout(() => {
+        yieldTimer = undefined;
+        void doYield();
+      }, cfg.yieldDelayMs);
+    }),
+  );
+
   context.subscriptions.push({
     dispose: () => {
       closeFullUi();
@@ -294,10 +330,17 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  clearYieldTimer();
   closeFullUi();
-  // 只在用户开了 dsh.stopOnExit 时杀掉我们自己 spawn 的 dsh；
-  // 连的是别人的实例时 core 内部会忽略 killRuntime。
-  controller?.dispose({ killRuntime: readConfig().stopOnExit });
+  // 无条件回收自己 spawn 出来的 dsh 进程。
+  //
+  // 这是 0.3.0 的一个真 bug：之前写成 stopOnExit || yieldOnBlur 决定杀不杀，
+  // 而两个默认值都是 false，于是每重载一次窗口就留一个孤儿 runtime——
+  // 用户的机器上因此攒出过 22 个 dsh 进程、1.9 GB 内存。
+  //
+  // attach 模式下 conn.spawnedByUs 恒为 false，core 内部会忽略 killRuntime，
+  // 所以这里写死 true 不会误杀用户自己启动器拉起来的实例。
+  controller?.dispose({ killRuntime: true });
   controller = undefined;
 }
 
@@ -316,6 +359,39 @@ async function openChat(arg?: unknown): Promise<void> {
 function workspaceCwdOrUndefined(): string | undefined {
   const folder = vscode.workspace.workspaceFolders?.[0];
   return folder ? folder.uri.fsPath : undefined;
+}
+
+/** 清掉待执行的让位定时器 */
+function clearYieldTimer(): void {
+  if (yieldTimer) clearTimeout(yieldTimer);
+  yieldTimer = undefined;
+}
+
+/** 状态栏在「正常 / 已让位」两种形态之间切换 */
+function setStatusBar(mode: 'normal' | 'yielded'): void {
+  if (!statusBar) return;
+  if (mode === 'yielded') {
+    statusBar.text = t('ext.yieldedStatus');
+    statusBar.tooltip = t('ext.yieldedTooltip');
+    return;
+  }
+  statusBar.text = '$(comment-discussion) dsh';
+  statusBar.tooltip = '点击打开 dsh 聊天';
+}
+
+/**
+ * 让位：停掉自己 spawn 的 dsh 进程，把会话写锁交还出去。
+ *
+ * 只在「实例是我们自己 spawn 的 + 当前没有在跑回合」时生效，其余情况静默跳过
+ * （判断逻辑在 ChatController.canYield / SessionCore.canYield）。回到窗口后任何
+ * 操作都会自动重连，重连时会重新订阅当前会话。
+ */
+async function doYield(): Promise<void> {
+  if (!controller || !controller.canYield()) return;
+  clearYieldTimer();
+  yielded = true;
+  await controller.yieldRuntime();
+  setStatusBar('yielded');
 }
 
 /**
